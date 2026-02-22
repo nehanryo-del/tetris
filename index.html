@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>TETRIS</title>
+
+<style>
+*{
+  user-select:none;
+  -webkit-user-select:none;
+  -webkit-touch-callout:none;
+}
+body{
+  margin:0;
+  background:#000;
+  color:#fff;
+  font-family:monospace;
+  overflow:hidden;
+}
+#root{
+  height:100vh;
+  display:flex;
+  flex-direction:column;
+}
+#top{
+  flex:1;
+  display:flex;
+  justify-content:center;
+  align-items:flex-start;
+  padding-top:8px;
+  gap:16px;
+}
+canvas{image-rendering:pixelated;}
+
+#game{
+  background:#000;
+  border:4px solid #666;
+  border-top-color:#ccc;
+  border-left-color:#ccc;
+  border-right-color:#444;
+  border-bottom-color:#444;
+}
+
+#side{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.panel{
+  border:3px solid #666;
+  border-top-color:#aaa;
+  border-left-color:#aaa;
+  border-right-color:#333;
+  border-bottom-color:#333;
+  background:#111;
+  padding:6px;
+  text-align:center;
+  min-width:96px;
+}
+
+#controls{
+  height:150px;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:32px;
+}
+
+.row{
+  display:flex;
+  gap:12px;
+  transform:translate(-30px,-60px);
+}
+.col{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  transform:translate(40px,-120px);
+}
+
+.btn{
+  width:64px;
+  height:64px;
+  background:#222;
+  border:3px solid #666;
+  border-top-color:#aaa;
+  border-left-color:#aaa;
+  border-right-color:#333;
+  border-bottom-color:#333;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:18px;
+  touch-action:none;
+}
+
+.pauseBtn{
+  background:none;
+  border:none;
+  color:#fff;
+  height:32px;
+  font-size:14px;
+}
+
+#overlay,#pauseOverlay,#gameOverOverlay{
+  position:fixed;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  z-index:10;
+}
+#overlay{background:#000;}
+#pauseOverlay{
+  display:none;
+  background:rgba(0,0,0,0.85);
+  font-size:24px;
+}
+#gameOverOverlay{
+  display:none;
+  background:rgba(0,0,0,0.9);
+}
+</style>
+</head>
+
+<body>
+<div id="root">
+  <div id="top">
+    <canvas id="game"></canvas>
+
+    <div id="side">
+      <div class="panel">NEXT<br><canvas id="next" width="96" height="96"></canvas></div>
+      <div class="panel">SCORE<br><span id="scoreVal">0</span></div>
+      <div class="panel">LINES<br><span id="linesVal">0</span></div>
+      <div class="panel">LEVEL<br><span id="levelVal">1</span></div>
+      <div class="panel"><button class="pauseBtn" id="pauseBtn">PAUSE</button></div>
+    </div>
+  </div>
+
+  <div id="controls">
+    <div class="row">
+      <div class="btn" id="left">◀</div>
+      <div class="btn" id="right">▶</div>
+    </div>
+    <div class="col">
+      <div class="btn" id="rotate">⟳</div>
+      <div class="btn" id="down">▼</div>
+      <div class="btn" id="hard">HARD</div>
+    </div>
+  </div>
+</div>
+
+<!-- TITLE -->
+<div id="overlay">
+  <div>
+    <div style="font-size:42px;letter-spacing:4px;margin-bottom:8px;">TETRIS</div>
+    <div id="highScoreTitle" style="font-size:18px;margin-bottom:20px;">HIGH SCORE: 0</div>
+    <div style="font-size:20px;">TAP TO START</div>
+  </div>
+</div>
+
+<!-- PAUSE -->
+<div id="pauseOverlay">PAUSED<br><small>(tap to resume)</small></div>
+
+<!-- GAME OVER -->
+<div id="gameOverOverlay">
+  <div>
+    <div style="font-size:32px;margin-bottom:8px;">GAME&nbsp;OVER</div>
+    <div id="finalScore" style="font-size:18px;margin-bottom:6px;">SCORE: 0</div>
+    <div id="highScoreOver" style="font-size:16px;margin-bottom:12px;">HIGH SCORE: 0</div>
+    <small>(tap to title)</small>
+  </div>
+</div>
+
+<script>
+/* ========= AUDIO ========= */
+let audioCtx;
+function initAudio(){
+  if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+}
+function beep(f,t=0.05,v=0.05){
+  if(!audioCtx) return;
+  const o=audioCtx.createOscillator();
+  const g=audioCtx.createGain();
+  o.type="square";
+  o.frequency.value=f;
+  g.gain.value=v;
+  o.connect(g).connect(audioCtx.destination);
+  o.start();
+  o.stop(audioCtx.currentTime+t);
+}
+
+const seMove   =()=>beep(880,0.03,0.04);
+const seRotate =()=>beep(1320,0.04,0.05);
+const seDrop   =()=>beep(660,0.03,0.04);
+const seHard   =()=>beep(440,0.12,0.06);
+const seLand   =()=>beep(220,0.08,0.05);
+const seClear  =()=>{beep(1760,0.08,0.06);setTimeout(()=>beep(1320,0.08,0.05),80);}
+const seLevel  =()=>{beep(1046,0.1,0.06);setTimeout(()=>beep(1318,0.1,0.06),120);}
+const seGameOver=()=>{beep(220,0.2,0.06);setTimeout(()=>beep(165,0.25,0.05),220);}
+
+let bgmTimer=null,bgmStep=0;
+const MELODY=[523,659,784,659,587,659,523,null,523,659,784,880,784,659,587,null];
+const BASS=[131,null,131,null,110,null,110,null,98,null,98,null,110,null,110,null];
+
+function startBGM(){
+  if(bgmTimer) return;
+  bgmStep=0;
+  bgmTimer=setInterval(()=>{
+    if(MELODY[bgmStep]) beep(MELODY[bgmStep],0.18,0.03);
+    if(BASS[bgmStep]) beep(BASS[bgmStep],0.25,0.02);
+    bgmStep=(bgmStep+1)%MELODY.length;
+  },300);
+}
+function stopBGM(){
+  clearInterval(bgmTimer);
+  bgmTimer=null;
+}
+
+/* ========= GAME CONST ========= */
+const COLS=10,ROWS=20,SIZE=24;
+const game=document.getElementById("game");
+game.width=COLS*SIZE;
+game.height=ROWS*SIZE;
+const ctx=game.getContext("2d");
+const nextCtx=document.getElementById("next").getContext("2d");
+
+/* ========= DATA ========= */
+const TETROMINOS=[
+ [[1,1,1,1]],
+ [[2,2],[2,2]],
+ [[0,3,0],[3,3,3]],
+ [[4,0,0],[4,4,4]],
+ [[0,0,5],[5,5,5]],
+ [[0,6,6],[6,6,0]],
+ [[7,7,0],[0,7,7]]
+];
+const COLORS=[null,'#0ff','#ff0','#a0f','#00f','#fa0','#0f0','#f00'];
+const LIGHT={'#0ff':'#9ff','#ff0':'#ff9','#a0f':'#e9f','#00f':'#99f','#fa0':'#fd9','#0f0':'#9f9','#f00':'#f99'};
+const DARK={'#0ff':'#099','#ff0':'#aa0','#a0f':'#609','#00f':'#009','#fa0':'#a60','#0f0':'#090','#f00':'#900'};
+
+/* ========= STATE ========= */
+let arena,player,nextMatrix;
+let score=0,lines=0,level=1;
+let running=false,paused=false,gameOver=false;
+let dropCounter=0,dropInterval=700,lastTime=0;
+let clearLines=[],clearTimer=0;
+
+/* ========= HIGH SCORE ========= */
+const HS_KEY="tetris_high_score";
+function loadHS(){return Number(localStorage.getItem(HS_KEY)||0);}
+function saveHS(v){
+  const h=loadHS();
+  if(v>h){localStorage.setItem(HS_KEY,v);return v;}
+  return h;
+}
+
+/* ========= CORE ========= */
+function init(){
+  arena=Array.from({length:ROWS},()=>Array(COLS).fill(0));
+  score=0;lines=0;level=1;
+  dropInterval=700;
+  nextMatrix=randomMino();
+  spawn();
+  updateHUD();
+}
+function randomMino(){
+  return TETROMINOS[Math.random()*7|0].map(r=>r.slice());
+}
+function spawn(){
+  player={matrix:nextMatrix,pos:{x:3,y:0}};
+  nextMatrix=randomMino();
+  if(collide()) endGame();
+}
+function collide(offY=0){
+  return player.matrix.some((r,y)=>r.some((v,x)=>{
+    if(!v) return false;
+    const ay=y+player.pos.y+offY;
+    const ax=x+player.pos.x;
+    return ay>=ROWS||ax<0||ax>=COLS||arena[ay][ax];
+  }));
+}
+function merge(){
+  player.matrix.forEach((r,y)=>r.forEach((v,x)=>{
+    if(v) arena[y+player.pos.y][x+player.pos.x]=v;
+  }));
+}
+function checkClear(){
+  clearLines=[];
+  arena.forEach((r,y)=>{if(r.every(v=>v)) clearLines.push(y);});
+  if(clearLines.length){seClear();clearTimer=6;}
+}
+function applyClear(){
+  arena=arena.filter((_,y)=>!clearLines.includes(y));
+  while(arena.length<ROWS) arena.unshift(Array(COLS).fill(0));
+  const c=clearLines.length;
+  lines+=c;
+  score+=c*100;
+  if(lines>=level*10){
+    level++;
+    dropInterval=Math.max(100,700-(level-1)*60);
+    seLevel();
+  }
+  updateHUD();
+  clearLines=[];
+}
+function getGhostY(){
+  let y=player.pos.y;
+  while(!collide(y-player.pos.y+1)) y++;
+  return y;
+}
+
+/* ========= DRAW ========= */
+function drawBlock(c,x,y,s,col,ghost=false){
+  c.globalAlpha=ghost?0.3:1;
+  c.fillStyle=col;
+  c.fillRect(x,y,s,s);
+  if(!ghost){
+    c.fillStyle=LIGHT[col];
+    c.fillRect(x,y,s,4);
+    c.fillRect(x,y,4,s);
+    c.fillStyle=DARK[col];
+    c.fillRect(x,y+s-4,s,4);
+    c.fillRect(x+s-4,y,4,s);
+  }
+  c.globalAlpha=1;
+}
+function draw(){
+  ctx.clearRect(0,0,game.width,game.height);
+  arena.forEach((r,y)=>r.forEach((v,x)=>{
+    if(v){
+      if(clearLines.includes(y)){
+        ctx.fillStyle="#fff";
+        ctx.fillRect(x*SIZE,y*SIZE,SIZE,SIZE);
+      }else{
+        drawBlock(ctx,x*SIZE,y*SIZE,SIZE,COLORS[v]);
+      }
+    }
+  }));
+  if(clearTimer===0){
+    const gy=getGhostY();
+    player.matrix.forEach((r,y)=>r.forEach((v,x)=>{
+      if(v) drawBlock(ctx,(x+player.pos.x)*SIZE,(y+gy)*SIZE,SIZE,COLORS[v],true);
+    }));
+    player.matrix.forEach((r,y)=>r.forEach((v,x)=>{
+      if(v) drawBlock(ctx,(x+player.pos.x)*SIZE,(y+player.pos.y)*SIZE,SIZE,COLORS[v]);
+    }));
+  }
+  nextCtx.clearRect(0,0,96,96);
+  const bs=24;
+  const ox=(96-nextMatrix[0].length*bs)/2;
+  const oy=(96-nextMatrix.length*bs)/2;
+  nextMatrix.forEach((r,y)=>r.forEach((v,x)=>{
+    if(v) drawBlock(nextCtx,ox+x*bs,oy+y*bs,bs,COLORS[v]);
+  }));
+}
+
+/* ========= LOOP ========= */
+function update(t){
+  const dt=t-lastTime;
+  lastTime=t;
+  if(running&&!paused&&!gameOver){
+    if(clearTimer>0){
+      clearTimer--;
+      if(clearTimer===0) applyClear();
+    }else{
+      dropCounter+=dt;
+      if(dropCounter>dropInterval){
+        player.pos.y++;
+        if(collide()){
+          player.pos.y--;
+          merge();
+          seLand();
+          checkClear();
+          spawn();
+        }
+        dropCounter=0;
+      }
+    }
+    draw();
+  }
+  requestAnimationFrame(update);
+}
+
+/* ========= FLOW ========= */
+function updateHUD(){
+  scoreVal.textContent=score;
+  linesVal.textContent=lines;
+  levelVal.textContent=level;
+}
+function startGame(){
+  initAudio();
+  init();
+  running=true;
+  paused=false;
+  gameOver=false;
+  overlay.style.display="none";
+  gameOverOverlay.style.display="none";
+  startBGM();
+}
+function endGame(){
+  running=false;
+  gameOver=true;
+  stopBGM();
+  seGameOver();
+  finalScore.textContent="SCORE: "+score;
+  const hs=saveHS(score);
+  highScoreOver.textContent="HIGH SCORE: "+hs;
+  highScoreTitle.textContent="HIGH SCORE: "+hs;
+  gameOverOverlay.style.display="flex";
+}
+function togglePause(){
+  if(!running||gameOver) return;
+  paused=!paused;
+  pauseOverlay.style.display=paused?"flex":"none";
+  paused?stopBGM():startBGM();
+}
+function returnToTitle(){
+  running=false;
+  paused=false;
+  gameOver=false;
+  gameOverOverlay.style.display="none";
+  overlay.style.display="flex";
+}
+
+/* ========= INPUT ========= */
+function bindHold(id,fn,ms){
+  const el=document.getElementById(id);
+  let t;
+  el.addEventListener("touchstart",e=>{
+    e.preventDefault();
+    fn();
+    t=setInterval(fn,ms);
+  },{passive:false});
+  ["touchend","touchcancel"].forEach(ev=>el.addEventListener(ev,()=>clearInterval(t)));
+}
+
+bindHold("left",()=>{player.pos.x--;if(collide())player.pos.x++;else seMove();},120);
+bindHold("right",()=>{player.pos.x++;if(collide())player.pos.x--;else seMove();},120);
+bindHold("down",()=>{player.pos.y++;if(collide()){player.pos.y--;merge();seLand();checkClear();spawn();}else seDrop();},50);
+
+hard.addEventListener("touchstart",e=>{
+  e.preventDefault();
+  player.pos.y=getGhostY();
+  merge();
+  seHard();
+  checkClear();
+  spawn();
+},{passive:false});
+
+rotate.addEventListener("touchstart",e=>{
+  e.preventDefault();
+  const p=player.matrix;
+  player.matrix=p[0].map((_,x)=>p.map(r=>r[x]).reverse());
+  if(collide()) player.matrix=p;
+  else seRotate();
+},{passive:false});
+
+pauseBtn.addEventListener("touchstart",e=>{e.preventDefault();togglePause();});
+pauseOverlay.addEventListener("touchstart",e=>{e.preventDefault();togglePause();});
+overlay.addEventListener("touchstart",e=>{e.preventDefault();startGame();});
+gameOverOverlay.addEventListener("touchstart",e=>{e.preventDefault();returnToTitle();});
+
+highScoreTitle.textContent="HIGH SCORE: "+loadHS();
+requestAnimationFrame(update);
+</script>
+</body>
+</html>
